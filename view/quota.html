@@ -1,0 +1,135 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Real-time Chart (SSE + Chart.js)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+    <style>
+      body {
+        font-family: Inter, system-ui, sans-serif;
+        margin: 16px;
+      }
+      .card {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 12px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+        border-radius: 8px;
+      }
+      canvas {
+        width: 100% !important;
+        height: 400px !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>Remaining Tokens</h2>
+      <canvas id="chart"></canvas>
+      <h2>Remaining Requests</h2>
+      <canvas id="chartRequests"></canvas>
+      
+      <div style="margin-top: 10px">
+        Connected to <code>/events</code> via <code>EventSource</code>
+      </div>
+    </div>
+    <script>
+      const ctx = document.getElementById("chart").getContext("2d");
+      const ctxRequests = document.getElementById("chartRequests").getContext("2d");
+      
+      const dataTokens = {
+        labels: [],
+        datasets: [
+          {
+            label: "remaining_tokens",
+            data: [],
+            fill: false,
+            tension: 0.2,
+            borderColor: "blue",
+          },
+        ],
+      };
+      
+      const dataRequests = {
+        labels: [],
+        datasets: [
+          {
+            label: "remaining_requests",
+            data: [],
+            fill: false,
+            tension: 0.2,
+            borderColor: "red",
+          },
+        ],
+      };
+      let x = 0;
+
+      const configTokens = {
+        type: "line",
+        data: dataTokens,
+        options: {
+          animation: false,
+          scales: {
+            x: { type: "linear", title: { display: true, text: "x" } },
+            y: { beginAtZero: false },
+          },
+          plugins: { legend: { display: false } },
+        },
+      };
+
+      const configRequests = {
+        type: "line",
+        data: dataRequests,
+        options: {
+          animation: false,
+          scales: {
+            x: { type: "linear", title: { display: true, text: "x" } },
+            y: { beginAtZero: false },
+          },
+          plugins: { legend: { display: false } },
+        },
+      };
+
+      const chartTokens = new Chart(ctx, configTokens);
+      const chartRequests = new Chart(ctxRequests, configRequests);
+      let lastAcceptedTime = 0;
+
+      const es = new EventSource("/events");
+      es.onmessage = (ev) => {
+        const now = Date.now();
+        if (now - lastAcceptedTime < 1000) {
+          return;
+        }
+        lastAcceptedTime = now;
+        try {
+          const p = JSON.parse(ev.data);
+          x += 1;
+          // push point
+          dataTokens.labels.push(x);
+          dataRequests.labels.push(x);
+          console.log(p);
+          dataTokens.datasets[0].data.push({ x: x, y: p.remaining_tokens });
+          dataRequests.datasets[0].data.push({ x: x, y: p.remaining_requests });
+  
+          // keep last N points
+          const maxPoints = 200;
+          if (dataTokens.labels.length > maxPoints) {
+            dataTokens.labels.shift();
+            dataTokens.datasets[0].data.shift();
+            dataRequests.labels.shift();
+            dataRequests.datasets[0].data.shift();
+          }
+  
+          chartTokens.update("none");
+          chartRequests.update("none");
+        } catch (err) {
+          console.error("invalid event:", err, ev.data);
+        }
+      };
+
+      es.onerror = (e) => {
+        console.error("EventSource failed", e);
+      };
+    </script>
+  </body>
+</html>

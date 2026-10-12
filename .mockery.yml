@@ -1,0 +1,11 @@
+all: false
+dir: "internal/mocks"
+outpkg: mocks
+filename: "mock_{{.InterfaceName | lower}}.go"
+log-level: info
+structname: "{{.Mock}}{{.InterfaceName}}"
+recursive: false
+packages:
+  proxy/internal/ports:
+    config:
+      all: true

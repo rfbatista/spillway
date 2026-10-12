@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Request Dashboard - Proxy Monitor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'success': '#10b981',
+                        'error': '#ef4444',
+                        'warning': '#f59e0b',
+                        'info': '#3b82f6'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Saira+Semi+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: oklch(0.17 0.012 250);
+            --bg-elev-1: oklch(0.215 0.011 252);
+            --bg-elev-2: oklch(0.255 0.012 252);
+            --line: oklch(0.36 0.011 252);
+            --line-strong: oklch(0.48 0.013 252);
+            --text-main: oklch(0.93 0.006 250);
+            --text-subtle: oklch(0.72 0.012 252);
+            --accent: oklch(0.68 0.17 235);
+            --ok: oklch(0.74 0.13 150);
+            --warn: oklch(0.79 0.14 88);
+            --err: oklch(0.67 0.19 27);
+        }
+
+        body {
+            font-family: "Public Sans", sans-serif;
+            background:
+                linear-gradient(to right, oklch(0.21 0.012 250 / 0.2) 1px, transparent 1px) 0 0 / 34px 34px,
+                linear-gradient(to bottom, oklch(0.21 0.012 250 / 0.2) 1px, transparent 1px) 0 0 / 34px 34px,
+                var(--bg);
+            color: var(--text-main);
+            min-height: 100vh;
+            letter-spacing: 0.01em;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: "Saira Semi Condensed", sans-serif;
+            letter-spacing: 0.02em;
+        }
+
+        header {
+            background: color-mix(in oklch, var(--bg-elev-2) 90%, black);
+            border-bottom: 1px solid var(--line-strong);
+            box-shadow: 0 14px 40px oklch(0 0 0 / 0.25);
+        }
+
+        main > div,
+        main > .bg-white,
+        .metric-card,
+        .control-panel,
+        .table-shell {
+            background: color-mix(in oklch, var(--bg-elev-1) 88%, black) !important;
+            border: 1px solid var(--line) !important;
+            box-shadow: 0 18px 36px oklch(0 0 0 / 0.24);
+        }
+
+        .metric-card {
+            border-radius: 14px;
+            transition: transform 180ms ease, border-color 180ms ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--line-strong) !important;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 0.25rem 0.65rem;
+            font-size: 0.73rem;
+            font-weight: 600;
+            border: 1px solid transparent;
+        }
+
+        .status-success {
+            color: var(--ok);
+            background: color-mix(in oklch, var(--ok) 14%, transparent);
+            border-color: color-mix(in oklch, var(--ok) 40%, transparent);
+        }
+        .status-error {
+            color: var(--err);
+            background: color-mix(in oklch, var(--err) 14%, transparent);
+            border-color: color-mix(in oklch, var(--err) 45%, transparent);
+        }
+        .status-warning {
+            color: var(--warn);
+            background: color-mix(in oklch, var(--warn) 14%, transparent);
+            border-color: color-mix(in oklch, var(--warn) 40%, transparent);
+        }
+        .status-info {
+            color: var(--accent);
+            background: color-mix(in oklch, var(--accent) 14%, transparent);
+            border-color: color-mix(in oklch, var(--accent) 35%, transparent);
+        }
+        .method-chip {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 0.48rem;
+            padding: 0.2rem 0.48rem;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+            border: 1px solid var(--line);
+            color: var(--text-main);
+            background: var(--bg-elev-2);
+        }
+        .method-chip.get { border-color: color-mix(in oklch, var(--accent) 35%, transparent); }
+        .method-chip.post { border-color: color-mix(in oklch, var(--ok) 45%, transparent); }
+        .method-chip.put { border-color: color-mix(in oklch, var(--warn) 45%, transparent); }
+        .method-chip.delete { border-color: color-mix(in oklch, var(--err) 45%, transparent); }
+        .method-chip.patch { border-color: oklch(0.73 0.14 295 / 0.6); }
+
+        .json-viewer {
+            background: oklch(0.15 0.01 252);
+            color: var(--text-main);
+            padding: 1rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            max-height: 24rem;
+            overflow-y: auto;
+            border-radius: 0.75rem;
+            border: 1px solid var(--line);
+        }
+        .json-viewer pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.6;
+        }
+        .json-key { color: oklch(0.79 0.14 296); font-weight: 600; }
+        .json-string { color: oklch(0.79 0.12 158); }
+        .json-number { color: oklch(0.77 0.15 14); }
+        .json-boolean { color: oklch(0.78 0.14 95); font-weight: 600; }
+        .json-null { color: var(--text-subtle); font-style: italic; }
+        .json-bracket { color: oklch(0.8 0.01 252); font-weight: 600; }
+
+        .json-copy-btn {
+            position: absolute;
+            top: 0.9rem;
+            right: 0.9rem;
+            border-radius: 0.6rem;
+            border: 1px solid var(--line-strong);
+            background: var(--bg-elev-2);
+            color: var(--text-main);
+            font-size: 0.74rem;
+            padding: 0.32rem 0.72rem;
+            transition: background-color 160ms ease;
+        }
+        .json-copy-btn:hover { background: color-mix(in oklch, var(--bg-elev-2) 65%, var(--accent)); }
+
+        .json-container {
+            position: relative;
+            border-radius: 0.95rem;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            background: var(--bg-elev-1);
+        }
+        .json-header {
+            padding: 0.9rem 1rem;
+            border-bottom: 1px solid var(--line);
+            background: var(--bg-elev-2);
+        }
+        .json-title {
+            font-size: 0.84rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-subtle);
+        }
+
+        select, button {
+            border-radius: 0.62rem !important;
+            border-color: var(--line) !important;
+        }
+
+        select {
+            background: var(--bg-elev-2) !important;
+            color: var(--text-main) !important;
+            border: 1px solid var(--line-strong) !important;
+        }
+
+        select option {
+            background: var(--bg-elev-2);
+            color: var(--text-main);
+        }
+
+        select:focus {
+            outline: none;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 30%, transparent);
+        }
+
+        .overview-section {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+
+        .metric-value {
+            color: var(--text-main) !important;
+            min-height: 2rem;
+            display: inline-flex;
+            align-items: center;
+        }
+
+        #clearFilters {
+            background: var(--bg-elev-2) !important;
+            color: var(--text-main) !important;
+            border: 1px solid var(--line-strong) !important;
+        }
+
+        #clearFilters:hover {
+            background: color-mix(in oklch, var(--bg-elev-2) 78%, var(--accent) 22%) !important;
+            color: var(--text-main) !important;
+        }
+
+        /* Keep Tailwind light utility classes aligned with the dark theme */
+        .bg-white,
+        .bg-gray-50,
+        .bg-gray-100 {
+            background: var(--bg-elev-1) !important;
+            color: var(--text-main) !important;
+        }
+
+        .border-gray-200,
+        .border-gray-300 {
+            border-color: var(--line) !important;
+        }
+
+        .hover\:bg-gray-100:hover,
+        .hover\:bg-gray-50:hover {
+            background: color-mix(in oklch, var(--bg-elev-2) 80%, var(--accent) 20%) !important;
+        }
+
+        .bg-blue-100,
+        .bg-green-100,
+        .bg-yellow-100,
+        .bg-red-100,
+        .bg-purple-100,
+        .bg-orange-100 {
+            background: var(--bg-elev-2) !important;
+            border: 1px solid var(--line);
+        }
+
+        .from-blue-50,
+        .to-blue-100,
+        .from-green-50,
+        .to-green-100,
+        .from-purple-50,
+        .to-purple-100,
+        .from-orange-50,
+        .to-orange-100 {
+            --tw-gradient-from: var(--bg-elev-1) var(--tw-gradient-from-position) !important;
+            --tw-gradient-to: color-mix(in oklch, var(--bg-elev-2) 88%, black) var(--tw-gradient-to-position) !important;
+            --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+        }
+
+        table thead {
+            background: color-mix(in oklch, var(--bg-elev-2) 92%, black) !important;
+        }
+        table thead th {
+            color: var(--text-subtle) !important;
+            font-size: 0.7rem !important;
+            letter-spacing: 0.08em !important;
+        }
+        table tbody tr {
+            border-color: var(--line) !important;
+            transition: background-color 150ms ease;
+        }
+        table tbody tr:hover {
+            background: color-mix(in oklch, var(--bg-elev-2) 80%, var(--accent) 20%) !important;
+        }
+        .request-row-error {
+            background: color-mix(in oklch, var(--err) 10%, var(--bg-elev-1)) !important;
+        }
+        .request-row-warning {
+            background: color-mix(in oklch, var(--warn) 10%, var(--bg-elev-1)) !important;
+        }
+        table tbody td,
+        .text-gray-900,
+        .text-gray-700,
+        .text-gray-600,
+        .text-gray-500 {
+            color: var(--text-main) !important;
+        }
+
+        .sla-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            border-radius: 999px;
+            padding: 0.36rem 0.8rem;
+            font-size: 0.74rem;
+            border: 1px solid var(--line);
+            background: var(--bg-elev-2);
+            color: var(--text-main);
+        }
+        .sla-dot {
+            width: 0.42rem;
+            height: 0.42rem;
+            border-radius: 999px;
+            background: var(--text-subtle);
+        }
+        .sla-good .sla-dot { background: var(--ok); }
+        .sla-degraded .sla-dot { background: var(--warn); }
+        .sla-critical .sla-dot { background: var(--err); }
+
+        #requestModal > div,
+        #requestModal .bg-white,
+        #requestModal .bg-gray-50,
+        #requestModal [class*="from-blue-50"],
+        #requestModal [class*="from-green-50"],
+        #requestModal [class*="from-purple-50"],
+        #requestModal [class*="from-orange-50"] {
+            background: var(--bg-elev-1) !important;
+            border-color: var(--line) !important;
+            color: var(--text-main) !important;
+        }
+
+        #requestModal .bg-gray-100 {
+            background: var(--bg-elev-2) !important;
+            color: var(--text-main) !important;
+        }
+
+        #requestModal .bg-red-50 {
+            background: color-mix(in oklch, var(--err) 17%, transparent) !important;
+        }
+
+        .loading {
+            animation: pulse 1.4s ease-in-out infinite;
+            background: color-mix(in oklch, var(--bg-elev-2) 70%, var(--text-subtle));
+            border-radius: 0.35rem;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.35; }
+            50% { opacity: 0.75; }
+            100% { opacity: 0.35; }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Header -->
+    <header class="shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center py-4">
+                <div class="flex items-center">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Request Command Deck</h1>
+                        <p class="text-xs mt-1 text-gray-600 uppercase tracking-wider">Incident triage and SLA telemetry</p>
+                    </div>
+                    <span class="ml-3 px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
+                        Proxy Monitor
+                    </span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="slaHealthChip" class="sla-chip">
+                        <span class="sla-dot"></span>
+                        <span id="slaHealthLabel">SLA unknown</span>
+                    </div>
+                    <div id="errorRateChip" class="sla-chip">
+                        Error rate <span id="errorRateValue">--%</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span class="text-sm text-gray-600">Live</span>
+                    </div>
+                    <button id="refreshBtn" class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors">
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Statistics Overview -->
+        <div class="overview-section mb-8">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Overview</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- Total Requests -->
+                <div class="metric-card bg-white p-6 rounded-lg shadow-sm border">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-500">Total Requests</p>
+                            <p id="totalRequests" class="metric-value text-2xl font-semibold text-gray-900">--</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Successful Requests -->
+                <div class="metric-card bg-white p-6 rounded-lg shadow-sm border">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <div class="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center">
+                                <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-500">Successful</p>
+                            <p id="successfulRequests" class="metric-value text-2xl font-semibold text-gray-900">--</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Failed Requests -->
+                <div class="metric-card bg-white p-6 rounded-lg shadow-sm border">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
+                                <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-500">Failed</p>
+                            <p id="failedRequests" class="metric-value text-2xl font-semibold text-gray-900">--</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Average Duration -->
+                <div class="metric-card bg-white p-6 rounded-lg shadow-sm border">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">
+                            <div class="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
+                                <svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-500">Avg Duration</p>
+                            <p id="averageDuration" class="metric-value text-2xl font-semibold text-gray-900">--</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters and Controls -->
+        <div class="control-panel bg-white p-6 rounded-lg shadow-sm border mb-6 hidden">
+            <div class="flex flex-wrap items-center gap-4">
+                <div class="flex items-center space-x-2">
+                    <label for="statusFilter" class="text-sm font-medium text-gray-700">Status:</label>
+                    <select id="statusFilter" class="border border-gray-300 rounded-md px-3 py-1 text-sm">
+                        <option value="">All Status</option>
+                        <option value="success">Success (2xx)</option>
+                        <option value="client_error">Client Error (4xx)</option>
+                        <option value="server_error">Server Error (5xx)</option>
+                        <option value="200">200 OK</option>
+                        <option value="201">201 Created</option>
+                        <option value="400">400 Bad Request</option>
+                        <option value="401">401 Unauthorized</option>
+                        <option value="403">403 Forbidden</option>
+                        <option value="404">404 Not Found</option>
+                        <option value="500">500 Internal Server Error</option>
+                        <option value="502">502 Bad Gateway</option>
+                        <option value="503">503 Service Unavailable</option>
+                        <option value="504">504 Gateway Timeout</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                    <label for="limitSelect" class="text-sm font-medium text-gray-700">Limit:</label>
+                    <select id="limitSelect" class="border border-gray-300 rounded-md px-3 py-1 text-sm">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+
+                <button id="applyFilters" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 transition-colors">
+                    Apply Filters
+                </button>
+
+                <button id="clearFilters" class="px-4 py-2 text-sm rounded-md transition-colors">
+                    Clear
+                </button>
+            </div>
+        </div>
+
+        <!-- Requests Table -->
+        <div class="table-shell bg-white rounded-lg shadow-sm border">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-900">Recent Requests</h3>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('id')">
+                                ID
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('start_time')">
+                                Time
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('method')">
+                                Method
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('path')">
+                                Path
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('backend_id')">
+                                Backend
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('status_code')">
+                                Status
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('duration')">
+                                Duration
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100" onclick="sortTable('retry_count')">
+                                Retries
+                                <span class="sort-indicator">↕</span>
+                            </th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Actions
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="requestsTableBody" class="bg-white divide-y divide-gray-200">
+                        <!-- Loading rows -->
+                        <tr>
+                            <td colspan="9" class="px-6 py-12 text-center">
+                                <div class="flex items-center justify-center">
+                                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                    <span class="ml-2 text-gray-500">Loading requests...</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Request Details Modal -->
+    <div id="requestModal" class="fixed inset-0 bg-black bg-opacity-50 overflow-y-auto h-full w-full hidden z-50 backdrop-blur-sm">
+        <div class="relative top-4 mx-auto p-0 border-0 w-11/12 max-w-6xl shadow-2xl rounded-xl bg-white overflow-hidden">
+            <!-- Modal Header -->
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 text-white">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-xl font-bold">Request Details</h3>
+                            <p class="text-blue-100 text-sm">Detailed information about the HTTP request</p>
+                        </div>
+                    </div>
+                    <button id="closeModal" class="text-white hover:text-blue-200 transition-colors p-2 rounded-lg hover:bg-white hover:bg-opacity-10">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Modal Content -->
+            <div class="p-6">
+                <div id="requestDetails" class="space-y-8">
+                    <!-- Details will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        // Requests are streamed live over SSE and held only in this bounded,
+        // client-side buffer — nothing is persisted server-side anymore.
+        const MAX_REQUESTS = 500;
+        let currentRequests = [];
+        let sortColumn = 'start_time';
+        let sortDirection = 'desc';
+        let eventSource = null;
+
+        // Utility functions
+        function formatDuration(duration) {
+            if (!duration) return 'N/A';
+            return duration; // Duration is already formatted by the backend
+        }
+
+        function formatDateTime(dateTime) {
+            if (!dateTime) return 'N/A';
+            return new Date(dateTime).toLocaleString();
+        }
+
+        function getStatusBadge(statusCode) {
+            if (statusCode >= 200 && statusCode < 300) {
+                return '<span class="status-badge status-success">Success</span>';
+            } else if (statusCode >= 400 && statusCode < 500) {
+                return '<span class="status-badge status-warning">Client Error</span>';
+            } else if (statusCode >= 500) {
+                return '<span class="status-badge status-error">Server Error</span>';
+            }
+            return '<span class="status-badge status-info">Unknown</span>';
+        }
+
+        function getMethodBadge(method) {
+            const classes = {
+                'GET': 'get',
+                'POST': 'post',
+                'PUT': 'put',
+                'DELETE': 'delete',
+                'PATCH': 'patch'
+            };
+            const variant = classes[method] || '';
+            return `<span class="method-chip ${variant}">${method}</span>`;
+        }
+
+        // JSON syntax highlighting
+        function highlightJSON(jsonString) {
+            if (!jsonString) return '';
+            
+            try {
+                // Try to parse and format JSON
+                const parsed = JSON.parse(jsonString);
+                const formatted = JSON.stringify(parsed, null, 2);
+                
+                // Apply syntax highlighting with simpler regex patterns
+                let highlighted = formatted
+                    // Highlight JSON keys (simple quoted strings followed by colon)
+                    .replace(/"([^"]+)"\s*:/g, '<span class="json-key">"$1"</span>:')
+                    // Highlight string values (simple quoted strings after colon)
+                    .replace(/:\s*"([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+                    // Highlight numbers
+                    .replace(/:\s*(-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+                    // Highlight booleans
+                    .replace(/:\s*(true|false)/g, ': <span class="json-boolean">$1</span>')
+                    // Highlight null
+                    .replace(/:\s*(null)/g, ': <span class="json-null">$1</span>')
+                    // Highlight brackets and braces
+                    .replace(/[{}[\]]/g, '<span class="json-bracket">$&</span>');
+                
+                return highlighted;
+            } catch (e) {
+                // If not valid JSON, return as plain text with HTML escaping
+                return jsonString.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            }
+        }
+
+        // Copy to clipboard functionality
+        function copyToClipboard(text, buttonElement) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalHTML = buttonElement.innerHTML;
+                buttonElement.innerHTML = `
+                <div class="flex justify-between items-center">
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    Copied!
+                </div>
+                `;
+                buttonElement.classList.remove('bg-slate-700', 'hover:bg-slate-800');
+                buttonElement.classList.add('bg-emerald-600', 'hover:bg-emerald-700');
+                setTimeout(() => {
+                    buttonElement.innerHTML = originalHTML;
+                    buttonElement.classList.remove('bg-emerald-600', 'hover:bg-emerald-700');
+                    buttonElement.classList.add('bg-slate-700', 'hover:bg-slate-800');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                const originalHTML = buttonElement.innerHTML;
+                buttonElement.innerHTML = `
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                    Failed
+                `;
+                buttonElement.classList.remove('bg-slate-700', 'hover:bg-slate-800');
+                buttonElement.classList.add('bg-red-600', 'hover:bg-red-700');
+                setTimeout(() => {
+                    buttonElement.innerHTML = originalHTML;
+                    buttonElement.classList.remove('bg-red-600', 'hover:bg-red-700');
+                    buttonElement.classList.add('bg-slate-700', 'hover:bg-slate-800');
+                }, 2000);
+            });
+        }
+
+        // secretHeaderPattern matches header names that can carry a credential.
+        // Authorization is already dropped when the request is captured, but a
+        // backend's config injects its own auth header (api-key, x-api-key, ...)
+        // and the proxy cannot know which configured name holds a secret — so the
+        // match is a deliberately broad one on the name, erring towards redacting
+        // a harmless header over pasting a live key into a terminal or a ticket.
+        const secretHeaderPattern = /auth|key|token|secret|credential/i;
+
+        // shellQuote wraps a value for a POSIX shell, which takes everything
+        // inside single quotes literally. A single quote in the value has to
+        // leave and re-enter the quoting to survive.
+        function shellQuote(value) {
+            return `'${String(value).replace(/'/g, "'\\''")}'`;
+        }
+
+        // secretParamPattern matches query parameter names that can carry a
+        // credential. A backend's config can inject its key as a query
+        // parameter (api-key=...) the same way it injects auth headers, and
+        // the tracker captures the URL after that injection — so the query
+        // string needs the same redaction the headers get, plus the
+        // Azure-style sig/signature parameters.
+        const secretParamPattern = /auth|key|token|secret|credential|^sig$|signature/i;
+
+        // redactCurlURL replaces credential-bearing query parameter values in
+        // the captured upstream URL with REDACTED. If the URL cannot be
+        // parsed, the whole query string is dropped rather than risking a
+        // live key in the clipboard.
+        function redactCurlURL(rawURL) {
+            try {
+                const url = new URL(rawURL);
+                for (const name of [...url.searchParams.keys()]) {
+                    if (secretParamPattern.test(name)) {
+                        url.searchParams.set(name, 'REDACTED');
+                    }
+                }
+                return url.toString();
+            } catch {
+                return String(rawURL).split('?')[0];
+            }
+        }
+
+        // buildCurl renders a captured request as a runnable curl command.
+        //
+        // It reproduces the call the proxy made to the *backend*, not the
+        // client's call to the proxy: requests are captured after mapping, so the
+        // URL, headers and body here are the upstream ones. That is what makes it
+        // useful during triage — it replays what the provider actually received —
+        // but it means the command is not a way to re-drive the proxy itself.
+        //
+        // Credential headers and query parameters come back as REDACTED and
+        // the command will not authenticate until an operator fills them in.
+        // That is the point: the dashboard must not turn a backend key into
+        // something copy-pasteable.
+        function buildCurl(request) {
+            const parts = [`curl -X ${request.method || 'POST'} ${shellQuote(redactCurlURL(request.url || ''))}`];
+
+            const headers = request.headers || {};
+            Object.keys(headers).sort().forEach(name => {
+                const value = secretHeaderPattern.test(name) ? 'REDACTED' : headers[name];
+                parts.push(`  -H ${shellQuote(`${name}: ${value}`)}`);
+            });
+
+            if (request.request_body) {
+                parts.push(`  --data-raw ${shellQuote(request.request_body)}`);
+            }
+            return parts.join(' \\\n');
+        }
+
+        function copyRequestAsCurl(requestId, buttonElement) {
+            const request = findRequest(requestId);
+            if (!request) {
+                alert('Request is no longer in the live buffer');
+                return;
+            }
+            copyToClipboard(buildCurl(request), buttonElement);
+        }
+
+        // Create JSON viewer with copy button
+        function createJSONViewer(title, jsonString, id) {
+            const containerId = `json-container-${id}`;
+            const copyId = `copy-btn-${id}`;
+            
+            // Escape the title for HTML
+            const escapedTitle = title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            
+            return `
+                <div class="json-container">
+                    <div class="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                    <div class="json-header">
+                        <div class="json-title">
+                            ${escapedTitle}
+                        </div>
+                    </div>
+                    <button id="${copyId}" class="json-copy-btn" data-json='${JSON.stringify(jsonString)}'>
+                      <div class="flex justify-between items-center">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                        Copy
+                      </div>
+                    </button>
+                    <div class="json-viewer">
+                        <pre>${highlightJSON(jsonString)}</pre>
+                    </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Data layer (client-side, fed by the SSE stream)
+
+        // matchesStatusFilter reports whether a request matches the selected
+        // status filter (a range keyword or a specific status code).
+        function matchesStatusFilter(request, statusFilter) {
+            if (!statusFilter) return true;
+            const code = request.status_code || 0;
+            switch (statusFilter) {
+                case 'success': return code >= 200 && code < 300;
+                case 'client_error': return code >= 400 && code < 500;
+                case 'server_error': return code >= 500;
+                default: {
+                    const wanted = parseInt(statusFilter, 10);
+                    return isNaN(wanted) ? true : code === wanted;
+                }
+            }
+        }
+
+        // getVisibleRequests applies the current filters, sorting, and limit to
+        // the live buffer to produce the rows shown in the table.
+        function getVisibleRequests() {
+            const statusFilterEl = document.getElementById('statusFilter');
+            const limitSelect = document.getElementById('limitSelect');
+            const statusFilter = statusFilterEl?.value || '';
+            const limit = parseInt(limitSelect?.value || '50', 10);
+
+            const filtered = currentRequests.filter(r => matchesStatusFilter(r, statusFilter));
+            const sorted = sortRequests(filtered);
+            return limit > 0 ? sorted.slice(0, limit) : sorted;
+        }
+
+        // computeStats aggregates the live buffer into the overview metrics,
+        // matching the shape the table/overview renderers expect.
+        function computeStats() {
+            let successful = 0;
+            let failed = 0;
+            let totalDurationMs = 0;
+
+            for (const r of currentRequests) {
+                const code = r.status_code || 0;
+                if (code >= 200 && code < 400) {
+                    successful++;
+                } else {
+                    failed++;
+                }
+                // duration is reported in nanoseconds by the backend
+                totalDurationMs += (r.duration || 0) / 1e6;
+            }
+
+            const total = currentRequests.length;
+            const avgMs = total > 0 ? totalDurationMs / total : 0;
+
+            return {
+                total_requests: total,
+                successful_requests: successful,
+                failed_requests: failed,
+                formatted_average_duration: formatMillis(avgMs),
+            };
+        }
+
+        function formatMillis(ms) {
+            if (!ms) return '0ms';
+            const seconds = Math.floor(ms / 1000);
+            const millis = Math.round(ms % 1000);
+            return seconds > 0
+                ? `${seconds}s${String(millis).padStart(3, '0')}ms`
+                : `${millis}ms`;
+        }
+
+        // findRequest returns a streamed request by id from the live buffer.
+        function findRequest(requestId) {
+            return currentRequests.find(r => r.id === requestId) || null;
+        }
+
+        // UI updates
+        function updateStats(stats) {
+            if (!stats) return;
+            
+            const totalRequests = stats.total_requests || 0;
+            const successfulRequests = stats.successful_requests || 0;
+            const failedRequests = stats.failed_requests || 0;
+            const errorRate = totalRequests > 0 ? (failedRequests / totalRequests) * 100 : 0;
+
+            document.getElementById('totalRequests').textContent = totalRequests;
+            document.getElementById('successfulRequests').textContent = successfulRequests;
+            document.getElementById('failedRequests').textContent = failedRequests;
+            document.getElementById('averageDuration').textContent = stats.formatted_average_duration || 'N/A';
+
+            const healthChip = document.getElementById('slaHealthChip');
+            const healthLabel = document.getElementById('slaHealthLabel');
+            const errorRateValue = document.getElementById('errorRateValue');
+            errorRateValue.textContent = `${errorRate.toFixed(2)}%`;
+
+            healthChip.classList.remove('sla-good', 'sla-degraded', 'sla-critical');
+            if (errorRate < 1) {
+                healthChip.classList.add('sla-good');
+                healthLabel.textContent = 'SLA healthy';
+            } else if (errorRate < 5) {
+                healthChip.classList.add('sla-degraded');
+                healthLabel.textContent = 'SLA degraded';
+            } else {
+                healthChip.classList.add('sla-critical');
+                healthLabel.textContent = 'SLA critical';
+            }
+        }
+
+        function updateRequestsTable(requests) {
+            const tbody = document.getElementById('requestsTableBody');
+            
+            if (requests.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9" class="px-6 py-12 text-center text-gray-500">
+                            No requests found
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = requests.map(request => {
+                let rowClass = 'request-row hover:bg-gray-50';
+                if (request.status_code >= 500) {
+                    rowClass += ' request-row-error';
+                } else if (request.status_code >= 400) {
+                    rowClass += ' request-row-warning';
+                }
+                return `
+                <tr class="${rowClass}">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">
+                        ${request.id.substring(0, 8)}...
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${formatDateTime(request.start_time)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${getMethodBadge(request.method)}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900 max-w-xs truncate" title="${request.path}">
+                        ${request.path}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <span class="status-badge status-info">
+                            ${request.backend_id}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${getStatusBadge(request.status_code)}
+                        <span class="ml-2 text-gray-500">${request.status_code}</span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${request.formatted_duration || 'N/A'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        ${request.retry_count || 0}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div class="flex items-center gap-2">
+                            <button onclick="showRequestDetails('${request.id}')"
+                                    class="font-medium px-3 py-1.5 bg-slate-700 text-white text-xs rounded-md hover:bg-slate-800 transition-colors">
+                                View Details
+                            </button>
+                            <button onclick="copyRequestAsCurl('${request.id}', this)"
+                                    title="Copy the upstream call as a curl command. Credentials are redacted."
+                                    class="font-medium px-3 py-1.5 bg-slate-700 text-white text-xs rounded-md hover:bg-slate-800 transition-colors">
+                                Copy cURL
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `}).join('');
+        }
+
+        function showRequestDetails(requestId) {
+            const details = findRequest(requestId);
+            if (!details) {
+                alert('Request is no longer in the live buffer');
+                return;
+            }
+
+                const modal = document.getElementById('requestModal');
+                const detailsContainer = document.getElementById('requestDetails');
+                
+                detailsContainer.innerHTML = `
+                    <!-- Overview Cards -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                        <!-- Request Info Card -->
+                        <div class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
+                            <div class="flex items-center mb-4">
+                                <div class="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center text-white">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                    </svg>
+                                </div>
+                                <h4 class="text-lg font-semibold text-gray-900 ml-3">Request Info</h4>
+                            </div>
+                            <div class="space-y-3">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Method</span>
+                                    ${getMethodBadge(details.method)}
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Status</span>
+                                    ${getStatusBadge(details.status_code)} <span class="text-sm text-gray-500 ml-2">${details.status_code}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Duration</span>
+                                    <span class="text-sm font-mono bg-gray-100 px-2 py-1 rounded">${details.formatted_duration || 'N/A'}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Retries</span>
+                                    <span class="text-sm font-mono bg-gray-100 px-2 py-1 rounded">${details.retry_count || 0}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Backend Info Card -->
+                        <div class="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
+                            <div class="flex items-center mb-4">
+                                <div class="w-10 h-10 bg-green-500 rounded-lg flex items-center justify-center text-white">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                                    </svg>
+                                </div>
+                                <h4 class="text-lg font-semibold text-gray-900 ml-3">Backend Info</h4>
+                            </div>
+                            <div class="space-y-3">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Backend ID</span>
+                                    <span class="text-sm font-mono bg-gray-100 px-2 py-1 rounded">${details.backend_id}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Path</span>
+                                    <span class="text-sm font-mono bg-gray-100 px-2 py-1 rounded truncate max-w-32" title="${details.path}">${details.path}</span>
+                                </div>
+                                <div class="flex justify-between items-center">
+                                    <span class="text-sm font-medium text-gray-600">Client IP</span>
+                                    <span class="text-sm font-mono bg-gray-100 px-2 py-1 rounded">${details.client_ip || 'N/A'}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Timing Info Card -->
+                        <div class="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6 border border-purple-200">
+                            <div class="flex items-center mb-4">
+                                <div class="w-10 h-10 bg-purple-500 rounded-lg flex items-center justify-center text-white">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                </div>
+                                <h4 class="text-lg font-semibold text-gray-900 ml-3">Timing</h4>
+                            </div>
+                            <div class="space-y-3">
+                                <div>
+                                    <span class="text-sm font-medium text-gray-600">Start Time</span>
+                                    <div class="text-sm font-mono bg-gray-100 px-2 py-1 rounded mt-1">${formatDateTime(details.start_time)}</div>
+                                </div>
+                                <div>
+                                    <span class="text-sm font-medium text-gray-600">End Time</span>
+                                    <div class="text-sm font-mono bg-gray-100 px-2 py-1 rounded mt-1">${formatDateTime(details.end_time)}</div>
+                                </div>
+                                ${details.error ? `
+                                <div>
+                                    <span class="text-sm font-medium text-red-600">Error</span>
+                                    <div class="text-sm text-red-600 bg-red-50 px-2 py-1 rounded mt-1">${details.error}</div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Request ID Section -->
+                    <div class="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                        <div class="flex items-center mb-3">
+                            <svg class="w-5 h-5 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+                            </svg>
+                            <h4 class="text-lg font-semibold text-gray-900">Request ID</h4>
+                        </div>
+                        <div class="font-mono text-sm bg-white px-4 py-3 rounded-lg border border-gray-300 break-all">${details.id}</div>
+                    </div>
+
+                    <!-- URL Section -->
+                    <div class="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                        <div class="flex items-center mb-3">
+                            <svg class="w-5 h-5 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+                            </svg>
+                            <h4 class="text-lg font-semibold text-gray-900">Full URL</h4>
+                        </div>
+                        <div class="font-mono text-sm bg-white px-4 py-3 rounded-lg border border-gray-300 break-all">${details.url}</div>
+                    </div>
+
+                    <!-- User Agent Section -->
+                    ${details.user_agent ? `
+                    <div class="bg-gray-50 rounded-xl p-6 border border-gray-200">
+                        <div class="flex items-center mb-3">
+                            <svg class="w-5 h-5 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                            </svg>
+                            <h4 class="text-lg font-semibold text-gray-900">User Agent</h4>
+                        </div>
+                        <div class="text-sm bg-white px-4 py-3 rounded-lg border border-gray-300 break-all">${details.user_agent}</div>
+                    </div>
+                    ` : ''}
+
+                    ${createJSONViewer('Request Headers', JSON.stringify(details.headers || {}, null, 2), 'req-headers')}
+
+                    ${details.request_body ? createJSONViewer('Request Body', details.request_body, 'req-body') : ''}
+
+                    ${createJSONViewer('Response Headers', JSON.stringify(details.response_headers || {}, null, 2), 'resp-headers')}
+
+                    ${details.response_body ? createJSONViewer('Response Body', details.response_body, 'resp-body') : ''}
+
+                    ${details.attempts && details.attempts.length > 0 ? `
+                    <div class="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-6 border border-orange-200">
+                        <div class="flex items-center mb-6">
+                            <div class="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center text-white">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <h4 class="text-lg font-semibold text-gray-900">Retry Attempts</h4>
+                                <p class="text-sm text-gray-600">${details.attempts.length} attempt${details.attempts.length > 1 ? 's' : ''} made</p>
+                            </div>
+                        </div>
+                        <div class="space-y-4">
+                            ${details.attempts.map((attempt, index) => `
+                                <div class="bg-white rounded-lg p-4 border border-orange-200 shadow-sm">
+                                    <div class="flex justify-between items-center mb-3">
+                                        <div class="flex items-center">
+                                            <div class="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-xs font-semibold">
+                                                ${attempt.attempt_number}
+                                            </div>
+                                            <span class="font-medium text-gray-900 ml-2">Attempt ${attempt.attempt_number}</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2">
+                                            ${getStatusBadge(attempt.status_code)}
+                                            <span class="text-sm text-gray-500">${attempt.status_code}</span>
+                                            <span class="text-xs font-mono bg-gray-100 px-2 py-1 rounded">${attempt.formatted_duration || 'N/A'}</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-sm space-y-2">
+                                        <div class="flex items-center text-gray-600">
+                                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                            </svg>
+                                            ${formatDateTime(attempt.start_time)}
+                                        </div>
+                                        ${attempt.error ? `
+                                        <div class="flex items-start text-red-600">
+                                            <svg class="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                            </svg>
+                                            <span class="text-sm">${attempt.error}</span>
+                                        </div>
+                                        ` : ''}
+                                        ${attempt.response_body ? `
+                                        <div class="mt-3">
+                                            <div class="flex items-center mb-2">
+                                                <svg class="w-4 h-4 mr-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                                </svg>
+                                                <span class="font-medium text-gray-700">Response Body</span>
+                                            </div>
+                                            <div class="json-viewer">
+                                                <pre>${highlightJSON(attempt.response_body)}</pre>
+                                            </div>
+                                        </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    ` : ''}
+                `;
+                
+                modal.classList.remove('hidden');
+                
+                // Add event listeners for copy buttons
+                setTimeout(() => {
+                    const copyButtons = modal.querySelectorAll('.json-copy-btn');
+                    copyButtons.forEach(button => {
+                        button.addEventListener('click', () => {
+                            const jsonData = button.getAttribute('data-json');
+                            if (jsonData) {
+                                const parsedJson = JSON.parse(jsonData);
+                                copyToClipboard(parsedJson, button);
+                            }
+                        });
+                    });
+                }, 100);
+        }
+
+        // Table sorting — returns a new array sorted by the current column.
+        function sortRequests(list) {
+            const sorted = [...list];
+            sorted.sort((a, b) => {
+                let aVal = a[sortColumn];
+                let bVal = b[sortColumn];
+
+                if (sortColumn === 'start_time') {
+                    aVal = new Date(aVal).getTime();
+                    bVal = new Date(bVal).getTime();
+                } else if (sortColumn === 'duration') {
+                    aVal = parseInt(aVal) || 0;
+                    bVal = parseInt(bVal) || 0;
+                }
+
+                if (sortDirection === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                }
+                return aVal < bVal ? 1 : -1;
+            });
+            return sorted;
+        }
+
+        function sortTable(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+            render();
+        }
+
+        // render recomputes the overview and table from the live buffer.
+        function render() {
+            updateStats(computeStats());
+            updateRequestsTable(getVisibleRequests());
+        }
+
+        // ingest adds a streamed request to the front of the bounded buffer.
+        function ingest(request) {
+            currentRequests.unshift(request);
+            if (currentRequests.length > MAX_REQUESTS) {
+                currentRequests.length = MAX_REQUESTS;
+            }
+            render();
+        }
+
+        // connectStream subscribes to the live request SSE feed.
+        function connectStream() {
+            if (eventSource) eventSource.close();
+            eventSource = new EventSource('/request-events');
+
+            eventSource.onmessage = (event) => {
+                try {
+                    ingest(JSON.parse(event.data));
+                } catch (err) {
+                    console.error('Failed to parse request event', err);
+                }
+            };
+
+            eventSource.onerror = (err) => {
+                // EventSource auto-reconnects; just surface the state.
+                console.warn('request stream interrupted, reconnecting...', err);
+            };
+        }
+
+        // Event listeners
+        // The buffer updates live via SSE; "Refresh" just clears the buffer.
+        document.getElementById('refreshBtn').addEventListener('click', () => {
+            currentRequests = [];
+            render();
+        });
+
+        const applyFiltersBtn = document.getElementById('applyFilters');
+        if (applyFiltersBtn) applyFiltersBtn.addEventListener('click', render);
+
+        const clearFiltersBtn = document.getElementById('clearFilters');
+        if (clearFiltersBtn) clearFiltersBtn.addEventListener('click', () => {
+            const statusFilter = document.getElementById('statusFilter');
+            const limitSelect = document.getElementById('limitSelect');
+
+            if (statusFilter) statusFilter.value = '';
+            if (limitSelect) limitSelect.value = '50';
+            render();
+        });
+
+        document.getElementById('closeModal').addEventListener('click', () => {
+            document.getElementById('requestModal').classList.add('hidden');
+        });
+
+        // Close modal when clicking outside
+        document.getElementById('requestModal').addEventListener('click', (e) => {
+            if (e.target.id === 'requestModal') {
+                document.getElementById('requestModal').classList.add('hidden');
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            render();
+            connectStream();
+        });
+
+        // Close the stream when the page is hidden; reconnect when visible.
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+            } else if (!eventSource) {
+                connectStream();
+            }
+        });
+    </script>
+</body>
+</html>

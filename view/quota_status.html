@@ -1,0 +1,104 @@
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Backend</title>
+    <style>
+      body {
+        font-family: Inter, system-ui, sans-serif;
+        margin: 16px;
+      }
+      .card {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 12px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+        border-radius: 8px;
+      }
+      canvas {
+        width: 100% !important;
+        height: 400px !important;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Model Usage Quota Dashboard</h1>
+    <div id="quota-container">
+      {{range .backends}}
+      <strong>ID:</strong> {{.ID}} <br />
+      <strong>URL:</strong> {{.URL}} <br />
+      <div
+        id="quota-{{.ID}}"
+        class="quota"
+        style="border: 1px solid #ccc; padding: 10px; margin: 10px 0"
+      ></div>
+      {{end}}
+      <!-- Each ModelUsageQuota update card will be injected here -->
+    </div>
+    <script>
+      // Holds the current state per model id (if needed)
+      const container = document.getElementById("quota-container");
+
+      // Accumulate updates per model ID
+      const pendingUpdates = {};
+      // Flag to indicate if an update has been scheduled
+      let updateScheduled = false;
+      // Throttle interval in milliseconds – adjust as needed
+      const throttleInterval = 200;
+
+      // Create an EventSource to consume the SSE stream.
+      const es = new EventSource("/events");
+
+      es.onmessage = (e) => {
+        try {
+          const model = JSON.parse(e.data);
+          if (model.id && model.id !== "") {
+            // Save/overwrite the latest update for this model ID in pendingUpdates.
+            pendingUpdates[model.id] = model;
+
+            // If no update is scheduled, schedule one
+            if (!updateScheduled) {
+              updateScheduled = true;
+              setTimeout(() => {
+                // Process all pending updates
+                Object.keys(pendingUpdates).forEach((id) => {
+                  const model = pendingUpdates[id];
+                  let modelElem = document.getElementById(`quota-${model.id}`);
+                  if (!modelElem) {
+                    // Create a new element if it doesn't exist.
+                    modelElem = document.createElement("div");
+                    modelElem.id = `quota-${model.id}`;
+                    modelElem.className = "quota";
+                    modelElem.style.border = "1px solid #ccc";
+                    modelElem.style.padding = "10px";
+                    modelElem.style.margin = "10px 0";
+                    container.appendChild(modelElem);
+                  }
+                  // Update the DOM element with the latest model data.
+                  modelElem.innerHTML = `
+                    <strong>Remaining Tokens:</strong> ${model.remaining_tokens} <br>
+                    <strong>Remaining Requests:</strong> ${model.remaining_requests} <br>
+                    <strong>Reset Tokens:</strong> ${Number(model.reset_tokens) / 1000000000} <br>
+                    <strong>Reset Requests:</strong> ${Number(model.reset_requests) / 1000000000} <br>
+                    <strong>Requested:</strong> ${model.requested}
+                  `;
+                });
+                // Clear pending updates and reset the flag.
+                for (let key in pendingUpdates) {
+                  delete pendingUpdates[key];
+                }
+                updateScheduled = false;
+              }, throttleInterval);
+            }
+          }
+        } catch (err) {
+          console.error("Error parsing event data", err);
+        }
+      };
+
+      es.onerror = (err) => {
+        console.error("EventSource error:", err);
+      };
+    </script>
+  </body>
+</html>

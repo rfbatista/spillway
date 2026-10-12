@@ -1,0 +1,15 @@
+.git
+.github
+.cursor
+.venv
+**/.venv
+**/cdk.out
+**/node_modules
+**/__pycache__
+*.md
+!README.md
+docs
+terminals
+.env
+**/*.test
+**/*_test.go
