@@ -51,7 +51,8 @@ client ──► Handler ──► Pool ──► Backend (mapper + transport) �
 | `RetryTransport` | Retries queued requests as capacity returns.                              |
 | `RequestTracker` | Records the request lifecycle and publishes it to logs and the dashboard. |
 
-All of it lives in `internal/proxy`.
+All of it lives in `internal/proxy`. The embeddable Anthropic pass-through is
+the separate public package `llmproxy` (see [Embedding the LLM proxy](#embedding-the-llm-proxy)).
 
 ## Quick start
 
@@ -80,6 +81,48 @@ go run ./cmd/openaiserver      # fake OpenAI
 go run ./cmd/anthropicserver   # fake Anthropic (:8092)
 go run ./cmd/bedrockserver     # fake Bedrock (:8093)
 ```
+
+## Embedding the LLM proxy
+
+The `llmproxy` package is an `http.Handler` you can mount in your own server.
+It passes native Anthropic Messages traffic through to the upstream untouched,
+with the caller's own credentials (subscription OAuth `Authorization` or
+`x-api-key`). After each request it hands your usage sink one usage record:
+model, status, timing, whether it streamed, and the input, output,
+cache-creation and cache-read tokens, read from JSON bodies and SSE streams
+alike. Bodies and credentials are never logged.
+
+```go
+import "github.com/rfbatista/spillway/llmproxy"
+
+type sink struct{}
+
+// Record runs off the response path, once per request. A slow or panicking
+// sink never delays or breaks the LLM response.
+func (sink) Record(ctx context.Context, r llmproxy.UsageRecord) {
+	log.Printf("%s %s in=%d out=%d", r.Attribution, r.Model, r.InputTokens, r.OutputTokens)
+}
+
+h, err := llmproxy.New(llmproxy.Config{Sink: sink{}}) // Upstream defaults to https://api.anthropic.com
+if err != nil {
+	log.Fatal(err)
+}
+mux.Handle("/llm/", http.StripPrefix("/llm", h))
+```
+
+Point the claude CLI at it, and say who is calling in the attribution header
+(`X-Llm-Attribution` by default). The proxy puts the value in the record and
+strips it before forwarding:
+
+```bash
+ANTHROPIC_BASE_URL=http://127.0.0.1:8080/llm \
+ANTHROPIC_CUSTOM_HEADERS='X-Llm-Attribution: session-42' \
+claude
+```
+
+Requests that fail are recorded too: an unreachable upstream (status 0, a 502
+to the client), an upstream that drops mid-stream, or a client that goes away,
+each with the usage seen so far and an `Error`.
 
 ## Configuration
 
