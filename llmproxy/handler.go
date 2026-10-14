@@ -1,6 +1,7 @@
 package llmproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -43,20 +44,26 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Path:        r.URL.Path,
 		StartedAt:   time.Now(),
 	}
-	reqModel := &requestModel{}
+	var head []byte
 	usage := &usageReader{}
 	defer func() {
 		rec.EndedAt = time.Now()
 		usage.fill(&rec)
 		if rec.Model == "" {
-			rec.Model = reqModel.model()
+			rec.Model = requestModel(head)
 		}
 		go h.record(rec)
 	}()
 
-	out, err := h.outgoing(r, reqModel)
+	head, body, err := readHead(r)
 	if err != nil {
-		rec.Error = err.Error()
+		rec.Error = h.failure(r, "request body", err)
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	out, err := h.outgoing(r, body)
+	if err != nil {
+		rec.Error = h.failure(r, "upstream request", err)
 		w.WriteHeader(http.StatusBadGateway)
 		return
 	}
@@ -86,7 +93,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // outgoing builds the upstream request: same method, path, query, headers and
 // body, minus the attribution header and the hop-by-hop headers.
-func (h *handler) outgoing(r *http.Request, model *requestModel) (*http.Request, error) {
+func (h *handler) outgoing(r *http.Request, body io.Reader) (*http.Request, error) {
 	target := *h.upstream
 	target.Path = strings.TrimSuffix(h.upstream.Path, "/") + r.URL.Path
 	if r.URL.RawPath != "" {
@@ -96,10 +103,6 @@ func (h *handler) outgoing(r *http.Request, model *requestModel) (*http.Request,
 	}
 	target.RawQuery = r.URL.RawQuery
 
-	var body io.Reader = http.NoBody
-	if r.ContentLength != 0 && r.Body != nil {
-		body = io.TeeReader(r.Body, model)
-	}
 	out, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
@@ -109,6 +112,24 @@ func (h *handler) outgoing(r *http.Request, model *requestModel) (*http.Request,
 	out.Header.Del(h.attribution)
 	removeHopHeaders(out.Header)
 	return out, nil
+}
+
+// readHead reads the first maxRequestHead bytes of the request body, where
+// its "model" is, and returns them with a reader for the whole body.
+func readHead(r *http.Request) ([]byte, io.Reader, error) {
+	if r.ContentLength == 0 || r.Body == nil {
+		return nil, http.NoBody, nil
+	}
+	head := make([]byte, maxRequestHead)
+	n, err := io.ReadFull(r.Body, head)
+	head = head[:n]
+	if err == io.EOF || err == io.ErrUnexpectedEOF {
+		return head, bytes.NewReader(head), nil
+	}
+	if err != nil {
+		return head, nil, err
+	}
+	return head, io.MultiReader(bytes.NewReader(head), r.Body), nil
 }
 
 // copyBody streams the upstream body to the client, flushing after every

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -468,4 +469,107 @@ func TestEachStreamedEventReachesTheClientBeforeTheNextIsSent(t *testing.T) {
 		received <- struct{}{}
 	}
 	assertStreamUsage(t, sink.next(t))
+}
+
+func TestAnUnreachableUpstreamGivesABadGatewayAndARecord(t *testing.T) {
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close()
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: gone.URL, Sink: sink})
+
+	resp, _ := post(t, base+"/v1/messages", `{"model":"claude-haiku-4-5"}`,
+		map[string]string{"X-Llm-Attribution": "session-1"})
+
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	rec := sink.next(t)
+	assert.Zero(t, rec.Status)
+	assert.NotEmpty(t, rec.Error)
+	assert.Equal(t, "session-1", rec.Attribution)
+	assert.Equal(t, "claude-haiku-4-5", rec.Model)
+	sink.none(t)
+}
+
+func TestAClientThatGoesAwayMidStreamIsRecordedWithTheUsageSoFar(t *testing.T) {
+	cancelled := make(chan struct{})
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, sseEvents[0])
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+			close(cancelled)
+		case <-time.After(5 * time.Second):
+		}
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	_, err = bufio.NewReader(resp.Body).ReadString('}')
+	require.NoError(t, err)
+	cancel()
+	resp.Body.Close()
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the upstream request was not cancelled")
+	}
+	rec := sink.next(t)
+	assert.True(t, rec.Streamed)
+	assert.Equal(t, http.StatusOK, rec.Status)
+	assert.Equal(t, "claude-opus-4-1-20250805", rec.Model)
+	assert.Equal(t, int64(25), rec.InputTokens)
+	assert.Equal(t, int64(1), rec.OutputTokens)
+	assert.Contains(t, rec.Error, "client disconnected")
+	sink.none(t)
+}
+
+func TestAnUpstreamThatDropsMidStreamIsRecordedWithAnError(t *testing.T) {
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		conn, buf, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		fmt.Fprintf(buf, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n",
+			len(sseEvents[0]), sseEvents[0])
+		buf.Flush()
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	rec := sink.next(t)
+	assert.True(t, rec.Streamed)
+	assert.Equal(t, int64(25), rec.InputTokens)
+	assert.NotEmpty(t, rec.Error)
+	assert.NotContains(t, rec.Error, "client disconnected")
+	sink.none(t)
+}
+
+func TestALargeRequestBodyArrivesWhole(t *testing.T) {
+	upstream, seen := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"input_tokens":1}`)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+	big := `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"` + strings.Repeat("ab", 300_000) + `"}]}`
+
+	post(t, base+"/v1/messages/count_tokens", big, nil)
+
+	assert.Equal(t, big, string((<-seen).body))
+	assert.Equal(t, "claude-sonnet-4-5", sink.next(t).Model)
 }

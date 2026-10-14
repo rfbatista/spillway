@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
-	"sync"
 )
 
 const (
@@ -244,32 +243,10 @@ func deref(n *int64) int64 {
 	return *n
 }
 
-// requestModel keeps the head of a request body as the transport reads it,
-// to find the request's top-level "model".
-type requestModel struct {
-	mu   sync.Mutex
-	head bytes.Buffer
-}
-
-func (m *requestModel) Write(p []byte) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if room := maxRequestHead - m.head.Len(); room > 0 {
-		if len(p) > room {
-			m.head.Write(p[:room])
-		} else {
-			m.head.Write(p)
-		}
-	}
-	return len(p), nil
-}
-
-// model walks the top-level keys of the captured head until "model". A head
-// cut short before the key gives "".
-func (m *requestModel) model() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	dec := json.NewDecoder(bytes.NewReader(m.head.Bytes()))
+// requestModel walks the top-level keys of a request body's head until
+// "model". A head cut short before the key gives "".
+func requestModel(head []byte) string {
+	dec := json.NewDecoder(bytes.NewReader(head))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		return ""
 	}
