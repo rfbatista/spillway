@@ -2,9 +2,9 @@ package quote_test
 
 import (
 	"context"
-	"proxy/internal/domain"
-	"proxy/internal/mocks"
-	"proxy/internal/quote"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/mocks"
+	"github.com/rfbatista/spillway/internal/quote"
 	"strings"
 	"testing"
 

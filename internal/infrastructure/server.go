@@ -10,8 +10,8 @@ import (
 
 	"log/slog"
 
-	"proxy/internal/handlers"
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/handlers"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 type statusRecorder struct {

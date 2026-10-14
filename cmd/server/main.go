@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"proxy/internal/configsource"
-	"proxy/internal/infrastructure"
-	"proxy/internal/proxy"
-	"proxy/internal/quote"
-	"proxy/internal/repositories"
+	"github.com/rfbatista/spillway/internal/configsource"
+	"github.com/rfbatista/spillway/internal/infrastructure"
+	"github.com/rfbatista/spillway/internal/proxy"
+	"github.com/rfbatista/spillway/internal/quote"
+	"github.com/rfbatista/spillway/internal/repositories"
 )
 
 func main() {

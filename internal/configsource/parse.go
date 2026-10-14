@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/proxy"
 
 	"gopkg.in/yaml.v3"
 )

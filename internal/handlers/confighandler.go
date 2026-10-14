@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 // ConfigHandler returns an http.HandlerFunc that serves the current backend config

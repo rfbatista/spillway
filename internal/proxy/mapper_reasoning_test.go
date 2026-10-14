@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"proxy/internal/apperr"
+	"github.com/rfbatista/spillway/internal/apperr"
 )
 
 // Clients (LangChain ChatOpenAI) ask for reasoning with the OpenAI

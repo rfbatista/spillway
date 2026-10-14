@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"proxy/internal/domain"
-	"proxy/internal/mocks"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

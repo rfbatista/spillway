@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"proxy/internal/domain"
 	"testing"
+
+	"github.com/rfbatista/spillway/internal/domain"
 )
 
 type DummyBackendConfigHeaders struct {

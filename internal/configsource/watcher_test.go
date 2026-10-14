@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"proxy/internal/configsource"
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/configsource"
+	"github.com/rfbatista/spillway/internal/proxy"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

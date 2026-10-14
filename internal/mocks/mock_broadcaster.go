@@ -4,7 +4,7 @@ package mocks
 
 import (
 	context "context"
-	domain "proxy/internal/domain"
+	domain "github.com/rfbatista/spillway/internal/domain"
 
 	mock "github.com/stretchr/testify/mock"
 )

@@ -6,10 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"proxy/internal/domain"
-	"proxy/internal/mocks"
 	"strings"
 	"testing"
+
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/mocks"
 
 	"github.com/stretchr/testify/mock"
 )

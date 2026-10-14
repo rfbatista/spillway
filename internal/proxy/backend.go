@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"proxy/internal/ports"
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 type Backend struct {

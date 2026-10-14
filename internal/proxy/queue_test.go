@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"proxy/internal/apperr"
-	"proxy/internal/domain"
-	"proxy/internal/mocks"
+	"github.com/rfbatista/spillway/internal/apperr"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/mocks"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

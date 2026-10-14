@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"proxy/internal/infrastructure"
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/infrastructure"
+	"github.com/rfbatista/spillway/internal/proxy"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

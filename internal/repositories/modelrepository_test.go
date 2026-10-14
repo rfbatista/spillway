@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"proxy/internal/domain"
+	"github.com/rfbatista/spillway/internal/domain"
 )
 
 func TestSaveAndGetModel(t *testing.T) {

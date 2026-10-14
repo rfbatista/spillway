@@ -3,7 +3,7 @@ package proxy
 import (
 	"fmt"
 
-	"proxy/internal/apperr"
+	"github.com/rfbatista/spillway/internal/apperr"
 )
 
 // reasoningBudgets maps the OpenAI reasoning_effort levels onto Anthropic

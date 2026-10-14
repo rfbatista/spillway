@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 // ErrNoChange is returned by ConfigSource.Load when configuration has not changed since the last call.

@@ -2,7 +2,7 @@ package ports
 
 import (
 	"context"
-	"proxy/internal/domain"
+	"github.com/rfbatista/spillway/internal/domain"
 )
 
 type GetUsageService interface {

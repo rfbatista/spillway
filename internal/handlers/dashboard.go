@@ -4,8 +4,9 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
-	"proxy/view"
 	"text/template"
+
+	"github.com/rfbatista/spillway/view"
 )
 
 func DashboardPage(w http.ResponseWriter, r *http.Request) {

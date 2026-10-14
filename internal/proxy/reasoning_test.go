@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"proxy/internal/apperr"
+	"github.com/rfbatista/spillway/internal/apperr"
 )
 
 func TestReasoningBudget(t *testing.T) {

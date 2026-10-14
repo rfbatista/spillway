@@ -3,8 +3,8 @@ package quote
 import (
 	"context"
 	"errors"
-	"proxy/internal/domain"
-	"proxy/internal/ports"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 type GetUsage struct {

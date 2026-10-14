@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"proxy/internal/domain"
-	"proxy/internal/ports"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 // maxBodyLogBytes caps the per-attempt response body preview.

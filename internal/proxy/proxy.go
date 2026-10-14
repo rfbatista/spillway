@@ -12,7 +12,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 
-	"proxy/internal/apperr"
+	"github.com/rfbatista/spillway/internal/apperr"
 )
 
 // mapErrCtxKey carries a MapRequest error from the Director to the transport,

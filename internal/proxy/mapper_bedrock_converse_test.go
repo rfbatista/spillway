@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"proxy/internal/apperr"
+	"github.com/rfbatista/spillway/internal/apperr"
 )
 
 // converseBody is a request in AWS Converse shape, as an AWS SDK client sends

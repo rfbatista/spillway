@@ -1,4 +1,4 @@
-module proxy
+module github.com/rfbatista/spillway
 
 go 1.24.2
 

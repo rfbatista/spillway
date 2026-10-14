@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"proxy/internal/ports"
 	"sync"
+
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 type BackendPool struct {

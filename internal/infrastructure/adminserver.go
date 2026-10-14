@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 
-	"proxy/internal/handlers"
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/handlers"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 // NewAdminServer creates the admin HTTP server that exposes operational

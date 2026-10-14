@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"proxy/internal/domain"
-	"proxy/internal/ports"
 	"sync"
+
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 // Stream fans out values of type T to every subscribed SSE client. Sends are

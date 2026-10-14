@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"proxy/internal/domain"
-	"proxy/internal/ports"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 // truncateBody caps body to maxLen bytes. It works on the raw bytes so the hot

@@ -6,6 +6,6 @@ log-level: info
 structname: "{{.Mock}}{{.InterfaceName}}"
 recursive: false
 packages:
-  proxy/internal/ports:
+  github.com/rfbatista/spillway/internal/ports:
     config:
       all: true

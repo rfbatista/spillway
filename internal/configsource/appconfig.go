@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 // AppConfigAgentSource loads backend configuration from the AWS AppConfig Agent

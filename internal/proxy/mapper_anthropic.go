@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"proxy/internal/apperr"
+	"github.com/rfbatista/spillway/internal/apperr"
 )
 
 const defaultMaxTokens = 4096

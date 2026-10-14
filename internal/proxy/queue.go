@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"proxy/internal/apperr"
-	"proxy/internal/domain"
-	"proxy/internal/ports"
+	"github.com/rfbatista/spillway/internal/apperr"
+	"github.com/rfbatista/spillway/internal/domain"
+	"github.com/rfbatista/spillway/internal/ports"
 )
 
 // queue_event values attached to retry_queue log lines. Alerts and dashboards

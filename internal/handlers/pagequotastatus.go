@@ -4,9 +4,10 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
-	"proxy/internal/proxy"
-	"proxy/view"
 	"text/template"
+
+	"github.com/rfbatista/spillway/internal/proxy"
+	"github.com/rfbatista/spillway/view"
 )
 
 func QuotaStatusPage(getPool func() *proxy.BackendPool) func(w http.ResponseWriter, r *http.Request) {

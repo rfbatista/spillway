@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 // Watcher polls a ConfigSource on a fixed interval and calls onChange when the

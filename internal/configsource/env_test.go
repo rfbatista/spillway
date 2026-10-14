@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"proxy/internal/configsource"
+	"github.com/rfbatista/spillway/internal/configsource"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

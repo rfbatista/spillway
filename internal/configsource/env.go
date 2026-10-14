@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"proxy/internal/proxy"
+	"github.com/rfbatista/spillway/internal/proxy"
 )
 
 // EnvConfigSource loads backend configuration from the PROXY_CONFIG environment variable.

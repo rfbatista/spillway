@@ -2,7 +2,7 @@ package repositories
 
 import (
 	"context"
-	"proxy/internal/domain"
+	"github.com/rfbatista/spillway/internal/domain"
 	"sync"
 )
 
