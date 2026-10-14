@@ -1,0 +1,359 @@
+package llmproxy_test
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/rfbatista/spillway/llmproxy"
+)
+
+// recordingSink collects every usage record the LLM proxy hands it.
+type recordingSink struct {
+	records chan llmproxy.UsageRecord
+}
+
+func newRecordingSink() *recordingSink {
+	return &recordingSink{records: make(chan llmproxy.UsageRecord, 16)}
+}
+
+func (s *recordingSink) Record(_ context.Context, r llmproxy.UsageRecord) {
+	s.records <- r
+}
+
+// next waits for the next usage record.
+func (s *recordingSink) next(t *testing.T) llmproxy.UsageRecord {
+	t.Helper()
+	select {
+	case r := <-s.records:
+		return r
+	case <-time.After(2 * time.Second):
+		t.Fatal("no usage record reached the sink")
+		return llmproxy.UsageRecord{}
+	}
+}
+
+// none asserts no further usage record arrives.
+func (s *recordingSink) none(t *testing.T) {
+	t.Helper()
+	select {
+	case r := <-s.records:
+		t.Fatalf("unexpected extra usage record: %+v", r)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// seenRequest is what the fake Anthropic upstream received.
+type seenRequest struct {
+	method string
+	uri    string
+	header http.Header
+	body   []byte
+}
+
+// fakeUpstream starts a fake Anthropic API that records each request it gets
+// and answers with respond.
+func fakeUpstream(t *testing.T, respond http.HandlerFunc) (*httptest.Server, <-chan seenRequest) {
+	t.Helper()
+	seen := make(chan seenRequest, 16)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		seen <- seenRequest{method: r.Method, uri: r.RequestURI, header: r.Header.Clone(), body: body}
+		respond(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, seen
+}
+
+// mountProxy mounts the LLM proxy under /llm on a host server, the way the
+// harness does, and returns the host's base URL for it.
+func mountProxy(t *testing.T, cfg llmproxy.Config) string {
+	t.Helper()
+	h, err := llmproxy.New(cfg)
+	require.NoError(t, err)
+	mux := http.NewServeMux()
+	mux.Handle("/llm/", http.StripPrefix("/llm", h))
+	host := httptest.NewServer(mux)
+	t.Cleanup(host.Close)
+	return host.URL + "/llm"
+}
+
+const messageJSON = `{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929",` +
+	`"content":[{"type":"text","text":"Hi"}],"stop_reason":"end_turn",` +
+	`"usage":{"input_tokens":12,"output_tokens":34,"cache_creation_input_tokens":56,"cache_read_input_tokens":78}}`
+
+func TestPassThroughForwardsTheRequestUntouchedAndRecordsJSONUsage(t *testing.T) {
+	upstream, seen := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Request-Id", "req_abc")
+		w.Header().Set("Anthropic-Ratelimit-Requests-Remaining", "49")
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, messageJSON)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	reqBody := []byte(`{"model":"claude-sonnet-4-5","max_tokens":64,"messages":[{"role":"user","content":"Hello"}]}`)
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/messages?beta=true", bytes.NewReader(reqBody))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer sk-ant-oat-test")
+	req.Header.Set("X-Api-Key", "sk-ant-api-test")
+	req.Header.Set("Anthropic-Version", "2023-06-01")
+	req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
+	req.Header.Set("X-Llm-Attribution", "session-42")
+
+	started := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	gotBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	got := <-seen
+	assert.Equal(t, http.MethodPost, got.method)
+	assert.Equal(t, "/v1/messages?beta=true", got.uri)
+	assert.Equal(t, reqBody, got.body)
+	assert.Equal(t, "Bearer sk-ant-oat-test", got.header.Get("Authorization"))
+	assert.Equal(t, "sk-ant-api-test", got.header.Get("X-Api-Key"))
+	assert.Equal(t, "2023-06-01", got.header.Get("Anthropic-Version"))
+	assert.Equal(t, "oauth-2025-04-20", got.header.Get("Anthropic-Beta"))
+	assert.Equal(t, "application/json", got.header.Get("Content-Type"))
+	assert.NotContains(t, got.header, "X-Llm-Attribution")
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, messageJSON, string(gotBody))
+	assert.Equal(t, "req_abc", resp.Header.Get("Request-Id"))
+	assert.Equal(t, "49", resp.Header.Get("Anthropic-Ratelimit-Requests-Remaining"))
+
+	rec := sink.next(t)
+	assert.NotEmpty(t, rec.ID)
+	assert.Equal(t, "session-42", rec.Attribution)
+	assert.Equal(t, http.MethodPost, rec.Method)
+	assert.Equal(t, "/v1/messages", rec.Path)
+	assert.Equal(t, "claude-sonnet-4-5-20250929", rec.Model)
+	assert.Equal(t, http.StatusOK, rec.Status)
+	assert.False(t, rec.Streamed)
+	assert.Equal(t, int64(12), rec.InputTokens)
+	assert.Equal(t, int64(34), rec.OutputTokens)
+	assert.Equal(t, int64(56), rec.CacheCreationInputTokens)
+	assert.Equal(t, int64(78), rec.CacheReadInputTokens)
+	assert.Empty(t, rec.Error)
+	assert.False(t, rec.StartedAt.Before(started.Truncate(time.Second)))
+	assert.False(t, rec.EndedAt.Before(rec.StartedAt))
+	sink.none(t)
+}
+
+func post(t *testing.T, url, body string, header map[string]string) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	got, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp, string(got)
+}
+
+func TestCountTokensIsRecordedWithZeroTokensAndTheRequestModel(t *testing.T) {
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"input_tokens":2095}`)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	resp, body := post(t, base+"/v1/messages/count_tokens",
+		`{"messages":[{"role":"user","content":"x"}],"model":"claude-opus-4-1","system":"s"}`, nil)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, `{"input_tokens":2095}`, body)
+	rec := sink.next(t)
+	assert.Equal(t, "/v1/messages/count_tokens", rec.Path)
+	assert.Equal(t, "claude-opus-4-1", rec.Model)
+	assert.Empty(t, rec.Attribution)
+	assert.Zero(t, rec.InputTokens)
+	assert.Zero(t, rec.OutputTokens)
+	assert.Zero(t, rec.CacheCreationInputTokens)
+	assert.Zero(t, rec.CacheReadInputTokens)
+	assert.Empty(t, rec.Error)
+}
+
+func TestErrorStatusPassesThroughAndIsRecorded(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, 529} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			errBody := `{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}`
+			upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "7")
+				w.WriteHeader(status)
+				io.WriteString(w, errBody)
+			})
+			sink := newRecordingSink()
+			base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+			resp, body := post(t, base+"/v1/messages", `{"model":"claude-haiku-4-5","max_tokens":1}`,
+				map[string]string{"X-Llm-Attribution": "harness:system"})
+
+			assert.Equal(t, status, resp.StatusCode)
+			assert.Equal(t, "7", resp.Header.Get("Retry-After"))
+			assert.Equal(t, errBody, body)
+			rec := sink.next(t)
+			assert.Equal(t, status, rec.Status)
+			assert.Equal(t, "harness:system", rec.Attribution)
+			assert.Equal(t, "claude-haiku-4-5", rec.Model)
+			assert.Zero(t, rec.InputTokens+rec.OutputTokens)
+			assert.Empty(t, rec.Error)
+		})
+	}
+}
+
+type panickingSink struct{ calls chan struct{} }
+
+func (s panickingSink) Record(context.Context, llmproxy.UsageRecord) {
+	s.calls <- struct{}{}
+	panic("sink exploded")
+}
+
+func TestAPanickingSinkNeverBreaksTheResponse(t *testing.T) {
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, messageJSON)
+	})
+	sink := panickingSink{calls: make(chan struct{}, 4)}
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	for i := 0; i < 2; i++ {
+		resp, body := post(t, base+"/v1/messages", `{"model":"m"}`, nil)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, messageJSON, body)
+		select {
+		case <-sink.calls:
+		case <-time.After(2 * time.Second):
+			t.Fatal("sink was not called")
+		}
+	}
+}
+
+type blockingSink struct{ release chan struct{} }
+
+func (s blockingSink) Record(context.Context, llmproxy.UsageRecord) { <-s.release }
+
+func TestABlockingSinkNeverDelaysTheResponse(t *testing.T) {
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, messageJSON)
+	})
+	sink := blockingSink{release: make(chan struct{})}
+	defer close(sink.release)
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	done := make(chan string)
+	go func() {
+		_, body := post(t, base+"/v1/messages", `{"model":"m"}`, nil)
+		done <- body
+	}()
+	select {
+	case body := <-done:
+		assert.Equal(t, messageJSON, body)
+	case <-time.After(2 * time.Second):
+		t.Fatal("response waited on the usage sink")
+	}
+}
+
+func TestNewRequiresASink(t *testing.T) {
+	_, err := llmproxy.New(llmproxy.Config{Upstream: "http://127.0.0.1:1"})
+	assert.Error(t, err)
+}
+
+func TestNewRejectsARelativeUpstream(t *testing.T) {
+	_, err := llmproxy.New(llmproxy.Config{Upstream: "api.anthropic.com", Sink: newRecordingSink()})
+	assert.Error(t, err)
+}
+
+func TestACustomAttributionHeaderIsReadAndStripped(t *testing.T) {
+	upstream, seen := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, messageJSON)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink, AttributionHeader: "x-who"})
+
+	post(t, base+"/v1/messages", `{"model":"m"}`, map[string]string{
+		"X-Who":             "session-7",
+		"X-Llm-Attribution": "kept-as-any-other-header",
+	})
+
+	got := <-seen
+	assert.NotContains(t, got.header, "X-Who")
+	assert.Equal(t, "kept-as-any-other-header", got.header.Get("X-Llm-Attribution"))
+	assert.Equal(t, "session-7", sink.next(t).Attribution)
+}
+
+func TestEachRequestGetsItsOwnRecordID(t *testing.T) {
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, messageJSON)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	post(t, base+"/v1/messages", `{"model":"m"}`, nil)
+	post(t, base+"/v1/messages", `{"model":"m"}`, nil)
+
+	assert.NotEqual(t, sink.next(t).ID, sink.next(t).ID)
+}
+
+func gzipped(t *testing.T, s string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, err := io.WriteString(zw, s)
+	require.NoError(t, err)
+	require.NoError(t, zw.Close())
+	return buf.Bytes()
+}
+
+func TestAGzippedResponsePassesThroughCompressedAndIsCounted(t *testing.T) {
+	compressed := gzipped(t, messageJSON)
+	upstream, seen := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Write(compressed)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/messages", strings.NewReader(`{"model":"m"}`))
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "gzip, deflate, br", (<-seen).header.Get("Accept-Encoding"))
+	assert.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+	assert.Equal(t, compressed, body)
+	rec := sink.next(t)
+	assert.Equal(t, "claude-sonnet-4-5-20250929", rec.Model)
+	assert.Equal(t, int64(12), rec.InputTokens)
+	assert.Equal(t, int64(34), rec.OutputTokens)
+	assert.Equal(t, int64(56), rec.CacheCreationInputTokens)
+	assert.Equal(t, int64(78), rec.CacheReadInputTokens)
+}
