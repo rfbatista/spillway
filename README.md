@@ -203,12 +203,12 @@ The proxy reads a JSON document with a `backends` array:
 ## Development
 
 ```bash
-go tool gotestsum ./internal/...   # unit tests
+go tool gotestsum ./...            # unit tests (internal/ and llmproxy/)
 air                                # run with hot reload (.air.toml)
 mockery                            # regenerate mocks (.mockery.yml) — never edit internal/mocks by hand
 ```
 
-Single test: `go test ./internal/proxy/ -run TestName`.
+Single test: `go test ./internal/proxy/ -run TestName` (or `./llmproxy/`).
 
 ## Docker
 

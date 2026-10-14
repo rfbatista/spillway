@@ -17,6 +17,12 @@ const (
 	// maxRequestHead bounds how much of a request body is kept to find its
 	// "model", which comes first in practice.
 	maxRequestHead = 64 << 10
+	// maxSSELine bounds one SSE line. Usage events are a few hundred bytes; a
+	// longer line is a content event and is skipped.
+	maxSSELine = 1 << 20
+	// decodeBacklog is how many chunks of an encoded body may wait for the
+	// decoder before the tee waits on it.
+	decodeBacklog = 256
 )
 
 // tokenUsage is Anthropic's usage object. Pointers tell a count that was
@@ -47,20 +53,20 @@ func (u *tokenUsage) merge(later *tokenUsage) {
 	}
 }
 
-// usageReader reads the model and token usage out of a response body as it is
+// usageTee reads the model and token usage out of a response body as it is
 // copied to the client. A gzip or deflate body is decoded on its own goroutine
 // for reading only; the client still gets the encoded bytes.
-type usageReader struct {
+type usageTee struct {
 	streamed bool
 	body     bytes.Buffer // a JSON body, up to maxJSONCapture
 	overflow bool
-	events   sseReader
+	events   sseUsage
 
-	encoded *io.PipeWriter
+	encoded chan []byte
 	decoded chan struct{}
 }
 
-func (u *usageReader) start(streamed bool, contentEncoding string) {
+func (u *usageTee) start(streamed bool, contentEncoding string) {
 	u.streamed = streamed
 	var decode func(io.Reader) (io.ReadCloser, error)
 	switch strings.ToLower(strings.TrimSpace(contentEncoding)) {
@@ -71,12 +77,18 @@ func (u *usageReader) start(streamed bool, contentEncoding string) {
 	default:
 		return
 	}
-	pr, pw := io.Pipe()
-	u.encoded = pw
+	u.encoded = make(chan []byte, decodeBacklog)
 	u.decoded = make(chan struct{})
+	pr, pw := io.Pipe()
+	go func() {
+		for chunk := range u.encoded {
+			pw.Write(chunk)
+		}
+		pw.Close()
+	}()
 	go func() {
 		defer close(u.decoded)
-		// Drain whatever is left so Write never blocks on a bad stream.
+		// Drain whatever is left so the feeder never blocks on a bad stream.
 		defer io.Copy(io.Discard, pr)
 		zr, err := decode(pr)
 		if err != nil {
@@ -87,16 +99,16 @@ func (u *usageReader) start(streamed bool, contentEncoding string) {
 	}()
 }
 
-// Write takes the next chunk of the body as the client receives it.
-func (u *usageReader) Write(p []byte) (int, error) {
+// Write takes the next chunk of the body as the client received it.
+func (u *usageTee) Write(p []byte) (int, error) {
 	if u.encoded != nil {
-		u.encoded.Write(p)
+		u.encoded <- bytes.Clone(p)
 		return len(p), nil
 	}
 	return u.capture(p)
 }
 
-func (u *usageReader) capture(p []byte) (int, error) {
+func (u *usageTee) capture(p []byte) (int, error) {
 	if u.streamed {
 		u.events.feed(p)
 		return len(p), nil
@@ -110,9 +122,9 @@ func (u *usageReader) capture(p []byte) (int, error) {
 }
 
 // finish waits for the decoder, if any, to read the whole body.
-func (u *usageReader) finish() {
+func (u *usageTee) finish() {
 	if u.encoded != nil {
-		u.encoded.Close()
+		close(u.encoded)
 		<-u.decoded
 	}
 }
@@ -122,7 +134,7 @@ type writerFunc func([]byte) (int, error)
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 // fill copies what was read into rec.
-func (u *usageReader) fill(rec *UsageRecord) {
+func (u *usageTee) fill(rec *UsageRecord) {
 	u.finish()
 	var model string
 	var usage tokenUsage
@@ -150,10 +162,10 @@ func (u *usageReader) fill(rec *UsageRecord) {
 	rec.CacheReadInputTokens = deref(usage.CacheReadInputTokens)
 }
 
-// sseReader reads Anthropic's server-sent events as they pass: the model and
+// sseUsage reads Anthropic's server-sent events as they pass: the model and
 // usage from message_start, then the counts in each later message_delta, the
 // last one winning.
-type sseReader struct {
+type sseUsage struct {
 	model string
 	usage tokenUsage
 
@@ -163,11 +175,7 @@ type sseReader struct {
 	hasData bool
 }
 
-// maxSSELine bounds one SSE line. Usage events are a few hundred bytes; a
-// longer line is a content event and is skipped.
-const maxSSELine = 1 << 20
-
-func (s *sseReader) feed(p []byte) {
+func (s *sseUsage) feed(p []byte) {
 	for len(p) > 0 {
 		i := bytes.IndexByte(p, '\n')
 		if i < 0 {
@@ -183,7 +191,7 @@ func (s *sseReader) feed(p []byte) {
 	}
 }
 
-func (s *sseReader) appendLine(p []byte) {
+func (s *sseUsage) appendLine(p []byte) {
 	if s.skip {
 		return
 	}
@@ -194,7 +202,7 @@ func (s *sseReader) appendLine(p []byte) {
 	s.line = append(s.line, p...)
 }
 
-func (s *sseReader) handleLine(line []byte) {
+func (s *sseUsage) handleLine(line []byte) {
 	if len(line) == 0 {
 		s.endOfEvent()
 		return
@@ -209,7 +217,7 @@ func (s *sseReader) handleLine(line []byte) {
 }
 
 // endOfEvent dispatches the event read so far, if any.
-func (s *sseReader) endOfEvent() {
+func (s *sseUsage) endOfEvent() {
 	defer func() { s.data, s.hasData = s.data[:0], false }()
 	if !s.hasData || !bytes.Contains(s.data, []byte(`"message_`)) {
 		return

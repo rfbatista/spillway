@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -266,8 +267,15 @@ func TestABlockingSinkNeverDelaysTheResponse(t *testing.T) {
 
 	done := make(chan string)
 	go func() {
-		_, body := post(t, base+"/v1/messages", `{"model":"m"}`, nil)
-		done <- body
+		// No require here: FailNow must run on the test goroutine.
+		resp, err := http.Post(base+"/v1/messages", "application/json", strings.NewReader(`{"model":"m"}`))
+		if err != nil {
+			done <- err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		done <- string(body)
 	}()
 	select {
 	case body := <-done:
@@ -572,4 +580,35 @@ func TestALargeRequestBodyArrivesWhole(t *testing.T) {
 
 	assert.Equal(t, big, string((<-seen).body))
 	assert.Equal(t, "claude-sonnet-4-5", sink.next(t).Model)
+}
+
+func TestAHostClientStillPassesTheEncodedBodyThrough(t *testing.T) {
+	compressed := gzipped(t, messageJSON)
+	upstream, seen := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Write(compressed)
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{
+		Upstream: upstream.URL,
+		Sink:     sink,
+		Client:   &http.Client{Transport: &http.Transport{}},
+	})
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(strings.TrimSuffix(base, "/llm"), "http://"))
+	require.NoError(t, err)
+	defer conn.Close()
+	// A raw request: Go's client would add Accept-Encoding on its own.
+	fmt.Fprint(conn, "POST /llm/v1/messages HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Empty(t, (<-seen).header.Get("Accept-Encoding"))
+	assert.Equal(t, "gzip", resp.Header.Get("Content-Encoding"))
+	assert.Equal(t, compressed, body)
+	assert.Equal(t, int64(34), sink.next(t).OutputTokens)
 }

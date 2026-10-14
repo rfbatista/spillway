@@ -28,49 +28,47 @@ var hopHeaders = []string{
 	"Upgrade",
 }
 
+// errClientGone marks a failure caused by the client going away.
+var errClientGone = errors.New("client disconnected")
+
 type handler struct {
-	upstream    *url.URL
-	attribution string
-	sink        UsageSink
-	client      *http.Client
-	log         *slog.Logger
+	upstream          *url.URL
+	attributionHeader string
+	sink              UsageSink
+	client            *http.Client
+	log               *slog.Logger
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rec := UsageRecord{
 		ID:          newID(),
-		Attribution: r.Header.Get(h.attribution),
+		Attribution: r.Header.Get(h.attributionHeader),
 		Method:      r.Method,
 		Path:        r.URL.Path,
 		StartedAt:   time.Now(),
 	}
 	var head []byte
-	usage := &usageReader{}
+	usage := &usageTee{}
 	defer func() {
 		rec.EndedAt = time.Now()
-		usage.fill(&rec)
-		if rec.Model == "" {
-			rec.Model = requestModel(head)
-		}
-		go h.record(rec)
+		// Usage is read and recorded after the handler returns, so neither
+		// delays the end of the response.
+		go h.record(rec, usage, head)
 	}()
 
 	head, body, err := readHead(r)
 	if err != nil {
-		rec.Error = h.failure(r, "request body", err)
-		w.WriteHeader(http.StatusBadGateway)
+		rec.Error = h.fail(w, r, http.StatusBadRequest, "request body", fmt.Errorf("%w: %w", errClientGone, err))
 		return
 	}
 	out, err := h.outgoing(r, body)
 	if err != nil {
-		rec.Error = h.failure(r, "upstream request", err)
-		w.WriteHeader(http.StatusBadGateway)
+		rec.Error = h.fail(w, r, http.StatusBadGateway, "build upstream request", err)
 		return
 	}
 	resp, err := h.client.Do(out)
 	if err != nil {
-		rec.Error = h.failure(r, "upstream request", err)
-		w.WriteHeader(http.StatusBadGateway)
+		rec.Error = h.fail(w, r, http.StatusBadGateway, "upstream request", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -86,8 +84,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	removeHopHeaders(dst)
 	w.WriteHeader(resp.StatusCode)
 
-	if err := h.copyBody(w, resp.Body, usage); err != nil {
-		rec.Error = h.failure(r, "response body", err)
+	if err := copyBody(w, resp.Body, usage); err != nil {
+		rec.Error = h.describe(r, "response body", err)
 	}
 }
 
@@ -105,11 +103,11 @@ func (h *handler) outgoing(r *http.Request, body io.Reader) (*http.Request, erro
 
 	out, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), body)
 	if err != nil {
-		return nil, fmt.Errorf("build upstream request: %w", err)
+		return nil, err
 	}
 	out.ContentLength = r.ContentLength
 	out.Header = r.Header.Clone()
-	out.Header.Del(h.attribution)
+	out.Header.Del(h.attributionHeader)
 	removeHopHeaders(out.Header)
 	return out, nil
 }
@@ -133,21 +131,21 @@ func readHead(r *http.Request) ([]byte, io.Reader, error) {
 }
 
 // copyBody streams the upstream body to the client, flushing after every
-// read so server-sent events reach the client as they arrive, and tees each
-// chunk to the usage reader.
-func (h *handler) copyBody(w http.ResponseWriter, body io.Reader, usage *usageReader) error {
+// read so server-sent events reach the client as they arrive. Each chunk is
+// teed to usage once the client has it.
+func copyBody(w http.ResponseWriter, body io.Reader, usage *usageTee) error {
 	rc := http.NewResponseController(w)
 	buf := make([]byte, 32*1024)
 	for {
 		n, readErr := body.Read(buf)
 		if n > 0 {
-			usage.Write(buf[:n])
 			if _, err := w.Write(buf[:n]); err != nil {
-				return fmt.Errorf("client disconnected: %w", err)
+				return fmt.Errorf("%w: %w", errClientGone, err)
 			}
 			if err := rc.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
-				return fmt.Errorf("client disconnected: %w", err)
+				return fmt.Errorf("%w: %w", errClientGone, err)
 			}
+			usage.Write(buf[:n])
 		}
 		if readErr == io.EOF {
 			return nil
@@ -158,12 +156,19 @@ func (h *handler) copyBody(w http.ResponseWriter, body io.Reader, usage *usageRe
 	}
 }
 
-// failure describes a failed request for its usage record and logs it,
-// without bodies or credentials.
-func (h *handler) failure(r *http.Request, stage string, err error) string {
+// fail answers a request the proxy could not complete with status, and
+// describes the failure for its usage record.
+func (h *handler) fail(w http.ResponseWriter, r *http.Request, status int, stage string, err error) string {
+	w.WriteHeader(status)
+	return h.describe(r, stage, err)
+}
+
+// describe words a failed request for its usage record and logs it, without
+// bodies or credentials.
+func (h *handler) describe(r *http.Request, stage string, err error) string {
 	msg := fmt.Sprintf("%s: %v", stage, err)
-	if r.Context().Err() != nil && !strings.Contains(msg, "client disconnected") {
-		msg = "client disconnected: " + msg
+	if r.Context().Err() != nil && !errors.Is(err, errClientGone) {
+		msg = fmt.Sprintf("%v: %s", errClientGone, msg)
 	}
 	h.log.Warn("llm proxy request failed",
 		slog.String("method", r.Method),
@@ -173,14 +178,19 @@ func (h *handler) failure(r *http.Request, stage string, err error) string {
 	return msg
 }
 
-// record hands rec to the usage sink, off the response path. A panicking sink
-// is logged and contained.
-func (h *handler) record(rec UsageRecord) {
+// record reads the usage out of what the tee saw, completes rec and hands it
+// to the usage sink. It runs off the response path; a panicking sink is
+// logged and contained.
+func (h *handler) record(rec UsageRecord, usage *usageTee, requestHead []byte) {
 	defer func() {
 		if p := recover(); p != nil {
 			h.log.Error("usage sink panicked", slog.String("id", rec.ID), slog.Any("panic", p))
 		}
 	}()
+	usage.fill(&rec)
+	if rec.Model == "" {
+		rec.Model = requestModel(requestHead)
+	}
 	h.sink.Record(context.Background(), rec)
 }
 

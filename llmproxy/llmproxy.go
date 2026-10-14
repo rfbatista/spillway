@@ -76,26 +76,35 @@ func New(cfg Config) (http.Handler, error) {
 		cfg.Logger = slog.Default()
 	}
 	return &handler{
-		upstream:    upstream,
-		attribution: http.CanonicalHeaderKey(cfg.AttributionHeader),
-		sink:        cfg.Sink,
-		client:      passThroughClient(cfg.Client),
-		log:         cfg.Logger,
+		upstream:          upstream,
+		attributionHeader: http.CanonicalHeaderKey(cfg.AttributionHeader),
+		sink:              cfg.Sink,
+		client:            passThroughClient(cfg.Client),
+		log:               cfg.Logger,
 	}, nil
 }
 
-// passThroughClient returns the client the LLM proxy forwards with. Redirects
-// are never followed: they go back to the caller as they are. The default
-// client has no overall timeout and leaves Accept-Encoding to the caller.
-func passThroughClient(c *http.Client) *http.Client {
-	if c == nil {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.DisableCompression = true
-		c = &http.Client{Transport: t}
-	} else {
-		cp := *c
-		c = &cp
+// passThroughClient returns the client the LLM proxy forwards with: a copy of
+// the host's, or one with no overall timeout. Redirects are never followed:
+// they go back to the caller as they are. Accept-Encoding is left to the
+// caller, so an *http.Transport never adds gzip and decodes the response.
+func passThroughClient(host *http.Client) *http.Client {
+	c := &http.Client{}
+	if host != nil {
+		*c = *host
+	}
+	switch t := c.Transport.(type) {
+	case nil:
+		c.Transport = noCompression(http.DefaultTransport.(*http.Transport))
+	case *http.Transport:
+		c.Transport = noCompression(t)
 	}
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return c
+}
+
+func noCompression(t *http.Transport) *http.Transport {
+	t = t.Clone()
+	t.DisableCompression = true
+	return t
 }
