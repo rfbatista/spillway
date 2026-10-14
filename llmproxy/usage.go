@@ -52,14 +52,17 @@ func (u *tokenUsage) merge(later *tokenUsage) {
 // copied to the client. A gzip or deflate body is decoded on its own goroutine
 // for reading only; the client still gets the encoded bytes.
 type usageReader struct {
-	body     bytes.Buffer
+	streamed bool
+	body     bytes.Buffer // a JSON body, up to maxJSONCapture
 	overflow bool
+	events   sseReader
 
 	encoded *io.PipeWriter
 	decoded chan struct{}
 }
 
 func (u *usageReader) start(streamed bool, contentEncoding string) {
+	u.streamed = streamed
 	var decode func(io.Reader) (io.ReadCloser, error)
 	switch strings.ToLower(strings.TrimSpace(contentEncoding)) {
 	case "gzip", "x-gzip":
@@ -95,6 +98,10 @@ func (u *usageReader) Write(p []byte) (int, error) {
 }
 
 func (u *usageReader) capture(p []byte) (int, error) {
+	if u.streamed {
+		u.events.feed(p)
+		return len(p), nil
+	}
 	if u.overflow || u.body.Len()+len(p) > maxJSONCapture {
 		u.overflow = true
 		u.body.Reset()
@@ -118,23 +125,116 @@ func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 // fill copies what was read into rec.
 func (u *usageReader) fill(rec *UsageRecord) {
 	u.finish()
-	if u.overflow || u.body.Len() == 0 {
-		return
-	}
-	var msg struct {
-		Model string      `json:"model"`
-		Usage *tokenUsage `json:"usage"`
-	}
-	if json.Unmarshal(u.body.Bytes(), &msg) != nil {
-		return
-	}
-	rec.Model = msg.Model
+	var model string
 	var usage tokenUsage
-	usage.merge(msg.Usage)
+	if u.streamed {
+		u.events.endOfEvent()
+		model, usage = u.events.model, u.events.usage
+	} else {
+		if u.overflow || u.body.Len() == 0 {
+			return
+		}
+		var msg struct {
+			Model string      `json:"model"`
+			Usage *tokenUsage `json:"usage"`
+		}
+		if json.Unmarshal(u.body.Bytes(), &msg) != nil {
+			return
+		}
+		model = msg.Model
+		usage.merge(msg.Usage)
+	}
+	rec.Model = model
 	rec.InputTokens = deref(usage.InputTokens)
 	rec.OutputTokens = deref(usage.OutputTokens)
 	rec.CacheCreationInputTokens = deref(usage.CacheCreationInputTokens)
 	rec.CacheReadInputTokens = deref(usage.CacheReadInputTokens)
+}
+
+// sseReader reads Anthropic's server-sent events as they pass: the model and
+// usage from message_start, then the counts in each later message_delta, the
+// last one winning.
+type sseReader struct {
+	model string
+	usage tokenUsage
+
+	line    []byte // the line being read, across writes
+	skip    bool   // the line being read is overlong and ignored
+	data    []byte // the data lines of the event being read
+	hasData bool
+}
+
+// maxSSELine bounds one SSE line. Usage events are a few hundred bytes; a
+// longer line is a content event and is skipped.
+const maxSSELine = 1 << 20
+
+func (s *sseReader) feed(p []byte) {
+	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			s.appendLine(p)
+			return
+		}
+		s.appendLine(p[:i])
+		if !s.skip {
+			s.handleLine(bytes.TrimSuffix(s.line, []byte("\r")))
+		}
+		s.line, s.skip = s.line[:0], false
+		p = p[i+1:]
+	}
+}
+
+func (s *sseReader) appendLine(p []byte) {
+	if s.skip {
+		return
+	}
+	if len(s.line)+len(p) > maxSSELine {
+		s.line, s.skip = s.line[:0], true
+		return
+	}
+	s.line = append(s.line, p...)
+}
+
+func (s *sseReader) handleLine(line []byte) {
+	if len(line) == 0 {
+		s.endOfEvent()
+		return
+	}
+	if data, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+		if s.hasData {
+			s.data = append(s.data, '\n')
+		}
+		s.data = append(s.data, bytes.TrimPrefix(data, []byte(" "))...)
+		s.hasData = true
+	}
+}
+
+// endOfEvent dispatches the event read so far, if any.
+func (s *sseReader) endOfEvent() {
+	defer func() { s.data, s.hasData = s.data[:0], false }()
+	if !s.hasData || !bytes.Contains(s.data, []byte(`"message_`)) {
+		return
+	}
+	var ev struct {
+		Type    string `json:"type"`
+		Message *struct {
+			Model string      `json:"model"`
+			Usage *tokenUsage `json:"usage"`
+		} `json:"message"`
+		Usage *tokenUsage `json:"usage"`
+	}
+	if json.Unmarshal(s.data, &ev) != nil {
+		return
+	}
+	switch ev.Type {
+	case "message_start":
+		if ev.Message != nil {
+			s.model = ev.Message.Model
+			s.usage.merge(ev.Message.Usage)
+		}
+	case "message_delta":
+		s.usage.merge(ev.Usage)
+	}
 }
 
 func deref(n *int64) int64 {

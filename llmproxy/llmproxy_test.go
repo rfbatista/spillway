@@ -1,6 +1,7 @@
 package llmproxy_test
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -356,4 +357,115 @@ func TestAGzippedResponsePassesThroughCompressedAndIsCounted(t *testing.T) {
 	assert.Equal(t, int64(34), rec.OutputTokens)
 	assert.Equal(t, int64(56), rec.CacheCreationInputTokens)
 	assert.Equal(t, int64(78), rec.CacheReadInputTokens)
+}
+
+// sseEvents is a streamed Messages response the way Anthropic sends it: usage
+// in message_start, the running output count in each message_delta.
+var sseEvents = []string{
+	"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_02\",\"type\":\"message\",\"role\":\"assistant\"," +
+		"\"model\":\"claude-opus-4-1-20250805\",\"content\":[],\"stop_reason\":null," +
+		"\"usage\":{\"input_tokens\":25,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":200,\"output_tokens\":1}}}\n\n",
+	"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+	"event: ping\ndata: {\"type\": \"ping\"}\n\n",
+	"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+	"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":null},\"usage\":{\"output_tokens\":7}}\n\n",
+	"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+	"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null}," +
+		"\"usage\":{\"input_tokens\":25,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":200,\"output_tokens\":15}}\n\n",
+	"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+}
+
+// sseUpstream answers with the given chunks, flushing after each one.
+func sseUpstream(t *testing.T, chunks []string) (*httptest.Server, <-chan seenRequest) {
+	return fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		for _, c := range chunks {
+			io.WriteString(w, c)
+			w.(http.Flusher).Flush()
+		}
+	})
+}
+
+func assertStreamUsage(t *testing.T, rec llmproxy.UsageRecord) {
+	t.Helper()
+	assert.True(t, rec.Streamed)
+	assert.Equal(t, "claude-opus-4-1-20250805", rec.Model)
+	assert.Equal(t, int64(25), rec.InputTokens)
+	assert.Equal(t, int64(15), rec.OutputTokens)
+	assert.Equal(t, int64(100), rec.CacheCreationInputTokens)
+	assert.Equal(t, int64(200), rec.CacheReadInputTokens)
+	assert.Empty(t, rec.Error)
+}
+
+func TestAStreamedResponsePassesThroughAndIsCounted(t *testing.T) {
+	upstream, _ := sseUpstream(t, sseEvents)
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	resp, body := post(t, base+"/v1/messages", `{"model":"claude-opus-4-1","stream":true}`,
+		map[string]string{"X-Llm-Attribution": "session-9"})
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "text/event-stream; charset=utf-8", resp.Header.Get("Content-Type"))
+	assert.Equal(t, strings.Join(sseEvents, ""), body)
+	rec := sink.next(t)
+	assert.Equal(t, "session-9", rec.Attribution)
+	assertStreamUsage(t, rec)
+	sink.none(t)
+}
+
+func TestAStreamedEventSplitAcrossWritesIsStillCounted(t *testing.T) {
+	whole := strings.Join(sseEvents, "")
+	var chunks []string
+	for i := 0; i < len(whole); i += 7 {
+		chunks = append(chunks, whole[i:min(i+7, len(whole))])
+	}
+	upstream, _ := sseUpstream(t, chunks)
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	_, body := post(t, base+"/v1/messages", `{"model":"claude-opus-4-1","stream":true}`, nil)
+
+	assert.Equal(t, whole, body)
+	assertStreamUsage(t, sink.next(t))
+}
+
+func TestEachStreamedEventReachesTheClientBeforeTheNextIsSent(t *testing.T) {
+	received := make(chan struct{})
+	upstream, _ := fakeUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, ev := range sseEvents {
+			io.WriteString(w, ev)
+			w.(http.Flusher).Flush()
+			select {
+			case <-received:
+			case <-time.After(2 * time.Second):
+				return // the client never saw this event: the test fails below
+			}
+		}
+	})
+	sink := newRecordingSink()
+	base := mountProxy(t, llmproxy.Config{Upstream: upstream.URL, Sink: sink})
+
+	req, err := http.NewRequest(http.MethodPost, base+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	r := bufio.NewReader(resp.Body)
+	for i, want := range sseEvents {
+		got := ""
+		for !strings.HasSuffix(got, "\n\n") {
+			line, err := r.ReadString('\n')
+			require.NoError(t, err, "event %d never arrived", i)
+			got += line
+		}
+		assert.Equal(t, want, got)
+		received <- struct{}{}
+	}
+	assertStreamUsage(t, sink.next(t))
 }
